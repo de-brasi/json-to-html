@@ -5,13 +5,56 @@ from dataclasses import dataclass
 
 @dataclass
 class FieldTypes:
+    """
+    Класс описывающий всевозможные ключи словарей-записей исходного json-документа.
+
+    Внимание! Если класс будет расширен какими-то функциями,
+    либо членами, не являющимися ключом словаря-записи,
+    необходимо при названии их дописывать префикс custom!
+    """
     type = "type"
     content = "content"
+
+    def count_members(self) -> int:
+        """
+        Returns the count of all member fields.
+        """
+        custom_prefix = "extra"
+
+        # Its count all public names, except extra names
+        #   (functions, values that are not dict keys etc.)
+        return len([
+            attr for attr in self.__dir__() if (
+                not attr.startswith('__') and
+                not attr.startswith(custom_prefix)
+            )
+        ])
 
 
 @dataclass
 class ContentTypes:
-    pass
+    """
+    Класс описывающий всевозможные типы записей из исходного json-документа.
+
+    Внимание! Если класс будет расширен какими-то функциями,
+    либо членами, не являющимися ключом словаря-записи,
+    необходимо при названии их дописывать префикс custom!
+    """
+
+    def count_members(self) -> int:
+        """
+        Returns the count of all member fields.
+        """
+        custom_prefix = "extra"
+
+        # Its count all public names, except extra names
+        #   (functions, values that are not dict keys etc.)
+        return len([
+            attr for attr in self.__dir__() if (
+                not attr.startswith('__') and
+                not attr.startswith(custom_prefix)
+            )
+        ])
 
 
 class ValidationException(Exception):
