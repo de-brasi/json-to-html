@@ -10,16 +10,17 @@ class FieldTypes:
 
     Внимание! Если класс будет расширен какими-то функциями,
     либо членами, не являющимися ключом словаря-записи,
-    необходимо при названии их дописывать префикс custom!
+    необходимо при названии их дописывать префикс additional!
     """
+
     type = "type"
     content = "content"
 
-    def count_members(self) -> int:
+    def additional_function_count_members(self) -> int:
         """
         Returns the count of all member fields.
         """
-        custom_prefix = "extra"
+        custom_prefix = "additional"
 
         # Its count all public names, except extra names
         #   (functions, values that are not dict keys etc.)
@@ -38,14 +39,19 @@ class ContentTypes:
 
     Внимание! Если класс будет расширен какими-то функциями,
     либо членами, не являющимися ключом словаря-записи,
-    необходимо при названии их дописывать префикс custom!
+    необходимо при названии их дописывать префикс additional!
     """
 
-    def count_members(self) -> int:
+    text = 'Text'
+    title = 'Title'
+    list = 'List'
+    image = 'image'
+
+    def additional_function_count_members(self) -> int:
         """
         Returns the count of all member fields.
         """
-        custom_prefix = "extra"
+        custom_prefix = "additional"
 
         # Its count all public names, except extra names
         #   (functions, values that are not dict keys etc.)
