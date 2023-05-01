@@ -1,5 +1,6 @@
 import json
 from typing import Dict
+from typing import Any
 from dataclasses import dataclass
 
 
@@ -13,23 +14,38 @@ class FieldTypes:
     необходимо при названии их дописывать префикс additional!
     """
 
+    # Types enumeration
     type = "type"
     content = "content"
+
+    # Additional members enumeration
+    additional_list_of_types = []
 
     def additional_function_count_members(self) -> int:
         """
         Returns the count of all member fields.
         """
-        custom_prefix = "additional"
 
         # Its count all public names, except extra names
         #   (functions, values that are not dict keys etc.)
-        return len([
-            attr for attr in self.__dir__() if (
-                not attr.startswith('__') and
-                not attr.startswith(custom_prefix)
-            )
-        ])
+        return len(self.additional_function_get_members())
+
+    def additional_function_get_members(self) -> list:
+        """
+        Return read-only list of values contained by types members
+        """
+
+        if not self.additional_list_of_types:
+            # Its collect all public names, except extra names
+            #   (functions, values that are not dict keys etc.)
+            custom_prefix = "additional"
+            self.additional_list_of_types = [
+                self.__class__.__dict__[attr] for attr in self.__dir__() if (
+                        not attr.startswith('__') and
+                        not attr.startswith(custom_prefix)
+                )
+            ]
+        return self.additional_list_of_types
 
 
 @dataclass
@@ -42,25 +58,40 @@ class ContentTypes:
     необходимо при названии их дописывать префикс additional!
     """
 
+    # Types enumeration
     text = 'Text'
     title = 'Title'
     list = 'List'
     image = 'image'
 
+    # Additional members enumeration
+    additional_list_of_types = []
+
     def additional_function_count_members(self) -> int:
         """
-        Returns the count of all member fields.
+        Return read-only list of values contained by types members
         """
-        custom_prefix = "additional"
 
         # Its count all public names, except extra names
         #   (functions, values that are not dict keys etc.)
-        return len([
-            attr for attr in self.__dir__() if (
-                not attr.startswith('__') and
-                not attr.startswith(custom_prefix)
-            )
-        ])
+        return len(self.additional_function_get_members())
+
+    def additional_function_get_members(self) -> list:
+        """
+        Return read-only list
+        """
+
+        if not self.additional_list_of_types:
+            # Its collect all public names, except extra names
+            #   (functions, values that are not dict keys etc.)
+            custom_prefix = "additional"
+            self.additional_list_of_types = [
+                self.__class__.__dict__[attr] for attr in self.__dir__() if (
+                        not attr.startswith('__') and
+                        not attr.startswith(custom_prefix)
+                )
+            ]
+        return self.additional_list_of_types
 
 
 class ValidationException(Exception):
