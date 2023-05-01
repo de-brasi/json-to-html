@@ -1,7 +1,19 @@
 import json
 from typing import Dict
-from typing import Any
 from dataclasses import dataclass
+
+
+class ValidationException(Exception):
+    def __init__(self, *args):
+        self.message = None
+        if args:
+            self.message = args[0]
+
+    def __str__(self):
+        if self.message:
+            return f'ValidationException: {self.message}'
+        else:
+            return f'ValidationException has been raised'
 
 
 @dataclass
@@ -68,17 +80,8 @@ class ContentTypes(Types):
     image = 'image'
 
 
-class ValidationException(Exception):
-    def __init__(self, *args):
-        self.message = None
-        if args:
-            self.message = args[0]
-
-    def __str__(self):
-        if self.message:
-            return f'ValidationException: {self.message}'
-        else:
-            return f'ValidationException has been raised'
+FIELD_TYPES = FieldTypes()
+CONTENT_TYPES = ContentTypes()
 
 
 def validate_content(to_validate: Dict) -> None:
@@ -86,33 +89,77 @@ def validate_content(to_validate: Dict) -> None:
     Raises ValidationException error if to_validate item has unexpected structure,
     does nothing otherwise.
     """
-    expected_fields_names = ["type", "content"]
+    expected_fields_names = FIELD_TYPES.additional_function_get_members()
+    expected_fields_count = FIELD_TYPES.additional_function_count_members()
     expected_fields_value_types = [str, ]
-    expected_fields_count = len(expected_fields_names)
 
     try:
         assert len(to_validate.keys()) == expected_fields_count
     except AssertionError:
-        raise ValidationException("Too many fields in passed collection for validation!")
+        raise ValidationException(f"Too many fields in passed collection for validation! "
+                                  f"Got {len(to_validate.keys())} fields: {to_validate.keys()}, "
+                                  f"expected {expected_fields_count}")
 
     for field, value in to_validate.items():
         try:
             assert field in expected_fields_names
         except AssertionError:
-            raise ValidationException(f"Unexpected field's name {field}")
+            raise ValidationException(f"Unexpected field's name {field}. "
+                                      f"Here is the list of allowed names: {expected_fields_names}")
 
         try:
             assert type(value) in expected_fields_value_types
         except AssertionError:
-            raise ValidationException(f"Unexpected field's value type {type(value)}")
+            raise ValidationException(f"Unexpected field's value type {type(value)}. "
+                                      f"Here is the list of allowed types: {expected_fields_value_types}")
 
 
 class Converter:
     def __init__(self):
-        pass
+        self.markup_patterns = {
+            CONTENT_TYPES.text: "{}",
+            CONTENT_TYPES.title: "# {}",
+            CONTENT_TYPES.list: "- {}",
+            CONTENT_TYPES.image: "![]({})",
+        }
 
-    def convert(self, value_type, value: str) -> str:
-        pass
+        self.markdown_list_separator = '\n\n'
+        self.markdown_list_line_break = ' ' * 2     # double space in the EOL for line-break
+
+        self.markdown_new_line = '\n\n'
+
+    def convert(self, value_type: str, value: str) -> str:
+        after_conversion = ""
+
+        match value_type:
+            case CONTENT_TYPES.title:
+                # h1 header using
+                after_conversion = \
+                    self.markup_patterns[CONTENT_TYPES.title].format(value)
+            case CONTENT_TYPES.text:
+                value = self._correct_line(value)
+                after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(value)
+            case CONTENT_TYPES.list:
+                list_items = value.split(self.markdown_list_separator)
+                for i in range(len(list_items)):
+                    one_list_item = list_items[i]
+                    correct_version = self._correct_line(one_list_item)
+                    correct_version.replace('\n', self.markdown_list_line_break + '\n')
+                    list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
+
+                after_conversion = self.markdown_new_line.join(list_items)
+                after_conversion += self.markdown_new_line
+            case CONTENT_TYPES.image:
+                after_conversion = \
+                    self.markup_patterns[CONTENT_TYPES.image].format(value)
+
+        after_conversion += self.markdown_new_line
+        return after_conversion
+
+    def _correct_line(self, source_line) -> str:
+        # TODO: добавить варианты постобработки
+        #  (например оставить как есть или удалить символы, которые интерпретируются как специальные)
+        return source_line
 
 
 if __name__ == "__main__":
@@ -123,6 +170,8 @@ if __name__ == "__main__":
             source_content = json.load(src)
             for item in source_content:
                 validate_content(item)
-                conversion_result = converter.convert(item['type'], item['content'])
-                dst.write()
+                conversion_result = converter.convert(
+                    item[FIELD_TYPES.type],
+                    item[FIELD_TYPES.content])
+                dst.write(conversion_result)
 
