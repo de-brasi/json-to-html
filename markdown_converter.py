@@ -17,7 +17,7 @@ class ValidationException(Exception):
 
 
 @dataclass
-class Types:
+class TypesEnum:
     """
     Only for inheritance.
     Allows you to create classes similar to a 'dataclass' and
@@ -54,7 +54,8 @@ class Types:
         return self.additional_list_of_types
 
 
-class FieldTypes(Types):
+class FieldTypesEnum(TypesEnum):
+    # TODO: translate
     """
     Класс описывающий всевозможные ключи словарей-записей исходного json-документа.
 
@@ -66,7 +67,8 @@ class FieldTypes(Types):
     content = "content"
 
 
-class ContentTypes(Types):
+class ContentTypesEnum(TypesEnum):
+    # TODO: translate
     """
     Класс описывающий всевозможные типы записей из исходного json-документа.
 
@@ -80,11 +82,12 @@ class ContentTypes(Types):
     image = 'image'
 
 
-FIELD_TYPES = FieldTypes()
-CONTENT_TYPES = ContentTypes()
+FIELD_TYPES = FieldTypesEnum()
+CONTENT_TYPES = ContentTypesEnum()
 
 
 def validate_content(to_validate: Dict) -> None:
+    # TODO: translate
     """
     Raises ValidationException error if to_validate item has unexpected structure,
     does nothing otherwise.
@@ -140,11 +143,12 @@ class Converter:
                 value = self._correct_line(value)
                 after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(value)
             case CONTENT_TYPES.list:
-                list_items = value.split(self.markdown_list_separator)
+                list_items = [value for value in
+                              value.split(self.markdown_list_separator) if value]
                 for i in range(len(list_items)):
                     one_list_item = list_items[i]
                     correct_version = self._correct_line(one_list_item)
-                    correct_version.replace('\n', self.markdown_list_line_break + '\n')
+                    correct_version = correct_version.replace('\n', self.markdown_list_line_break + '\n')
                     list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
 
                 after_conversion = self.markdown_new_line.join(list_items)
@@ -157,8 +161,16 @@ class Converter:
         return after_conversion
 
     def _correct_line(self, source_line) -> str:
-        # TODO: добавить варианты постобработки
-        #  (например оставить как есть или удалить символы, которые интерпретируются как специальные)
+        # todo: обрабатывать html-like стиль верстки (но там сложно, надо проверять много лексем)
+
+        source_word_by_char = [x for x in source_line]
+
+        # todo: построить автомат для простого случая лексем
+
+        # вроде так как строка неизменяема,
+        # то добавление 1 символа к строке создаст полную копию,
+        # то есть имеет смысл создать список с буквами и работать со списком
+
         return source_line
 
 
