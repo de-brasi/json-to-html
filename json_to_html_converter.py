@@ -1,6 +1,7 @@
 import json
 import re
 import markdown
+import click
 
 from typing import Dict
 from dataclasses import dataclass
@@ -198,7 +199,10 @@ class Converter:
         return source_line
 
 
-def main(source, destination):
+@click.command()
+@click.option('--source', '-s', help="Path to the source file directory")
+@click.option('--destination', '-d', help="Path to the directory for the output file")
+def main(source: str, destination: str) -> None:
     def get_id_with_increment() -> str:
         nonlocal cur_header_id_num, header_id_prefix
 
@@ -210,30 +214,31 @@ def main(source, destination):
     header_id_prefix = "header"
 
     converter = Converter()
-    # todo: opened all files from directory or getting file name
-    with open("./source_json/data.json", 'r') as src:
-        with open("./test.md", 'w') as dst:
+
+    with open(source, 'r') as src:
+        with open(destination, 'w') as dst:
             source_content = json.load(src)
+            md_representation = []
+
+            # json (source) -> md
             for item in source_content:
                 validate_content(item)
                 conversion_result = converter.convert(
                     item[FIELD_TYPES.type],
                     item[FIELD_TYPES.content])
-                dst.write(conversion_result)
+                md_representation.append(conversion_result)
 
-        # read from md
-        with open("./test.md", 'r') as f:
-            text = f.read()
-            html = markdown.markdown(text)
+            # md -> html (destination)
+            text = ''.join(md_representation)
+            html_representation = markdown.markdown(text)
 
-        # write to html with indexes
-        with open('res.html', 'w') as f:
+            # Insert id to headers
             header_pattern = r"<h1>"
             html = re.sub(header_pattern,
                           lambda exp: r'<h1 id="{}">'.format(get_id_with_increment()),
-                          html)
+                          html_representation)
 
-            f.write(html)
+            dst.write(html)
 
 
 if __name__ == "__main__":
