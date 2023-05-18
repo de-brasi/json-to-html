@@ -169,8 +169,6 @@ class Converter:
         return after_conversion
 
     def _correct_line(self, source_line) -> str:
-        # TODO: добавить варианты постобработки
-        #  (например оставить как есть или удалить символы, которые интерпретируются как специальные)
 
         # Convert self.md_special_symbols to one string "...<symbols>..."
         # Make with it md pattern "[...<symbols>...]" and remember detected occurrence with ()
@@ -182,14 +180,6 @@ class Converter:
 
         pattern = r"([{}])".format(single_character_pattern)
         source_line = re.sub(r"([{}])".format(single_character_pattern), r"\\\1", source_line)
-
-        # TODO: 1) всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
-        #       2) всякие варианты с #
-        #       3) особые случаи со скобками (например ![Alt text](/path/to/img.jpg))
-        #       4) посмотреть где каждая скобка используется в особых случаях
-        #       Полный список
-        #           List of special characters: ['#', '*', '-', '+', '\\', '_',
-        #                                       '{', '}', '[', ']', '(', ')', '#', '.', '!']
 
         # If there are sections similar to html code,
         # which is specially processed by the Markdown parser
