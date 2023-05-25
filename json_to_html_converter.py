@@ -1,3 +1,8 @@
+# TODO: обрабатывать ошибку когда пути к файлам не были переданы,
+#       когда файлы не существуют,
+#       switch -> if else,
+#       выбор json->md или json->html
+
 import json
 import re
 import markdown
@@ -136,10 +141,10 @@ class Converter:
         # Attention! List of special characters:
         #   ['#', '*', '-', '+', '\\', '_', '{', '}', '[', ']', '(', ')', '#', '.', '!']
         # For some reason the local Markdown parser doesn't require escaping some characters.
-        # Maybe it depends on the version of the Markdown engine.
+        # Maybe it depends on the version of the Markdown processor.
         self.md_special_symbols = ['*', '-', '+']
 
-    def convert(self, value_type: str, value: str) -> str:
+    def convert_to_md(self, value_type: str, value: str) -> str:
         after_conversion = ""
 
         match value_type:
@@ -148,14 +153,19 @@ class Converter:
                 after_conversion = \
                     self.markup_patterns[CONTENT_TYPES.title].format(value)
             case CONTENT_TYPES.text:
-                value = self._correct_line(value)
-                after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(value)
+                correct_version = self._correct_line(value)
+                # Make line breaks according to the markup
+                correct_version = correct_version.replace('\n', self.md_list_line_break + '\n')
+                after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
             case CONTENT_TYPES.list:
+                # Attention!
+                # Symbols denoting a new line may change and depend on the operation of the ML service
                 list_items = [value for value in
                               value.split(self.md_list_separator) if value]
                 for i in range(len(list_items)):
                     one_list_item = list_items[i]
                     correct_version = self._correct_line(one_list_item)
+                    # Make line breaks according to the markup
                     correct_version = correct_version.replace('\n', self.md_list_line_break + '\n')
                     list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
 
@@ -169,21 +179,24 @@ class Converter:
         return after_conversion
 
     def _correct_line(self, source_line) -> str:
-        # TODO: добавить варианты постобработки
-        #  (например оставить как есть или удалить символы, которые интерпретируются как специальные)
+        """
+        Escaping text that is to be converted and may contain special characters and Markdown constructs
+        """
+        ##################################
+        # Single-character special symbols
+        ##################################
 
         # Convert self.md_special_symbols to one string "...<symbols>..."
-        # Make with it md pattern "[...<symbols>...]" and remember detected occurrence with ()
-
+        # Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
         # Every special symbol must be concatenated with '\' symbol for escaping
         # Be careful with '\', '\\' and raw Python string in this code!
         single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
         assert single_character_pattern
 
-        pattern = r"([{}])".format(single_character_pattern)
-        source_line = re.sub(r"([{}])".format(single_character_pattern), r"\\\1", source_line)
+        one_char_pattern = r"([{}])".format(single_character_pattern)
+        source_line = re.sub(one_char_pattern, r"\\\1", source_line)
 
-        # TODO: 1) всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
+        # TODO: 1) -done- всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
         #       2) всякие варианты с #
         #       3) особые случаи со скобками (например ![Alt text](/path/to/img.jpg))
         #       4) посмотреть где каждая скобка используется в особых случаях
@@ -191,8 +204,28 @@ class Converter:
         #           List of special characters: ['#', '*', '-', '+', '\\', '_',
         #                                       '{', '}', '[', ']', '(', ')', '#', '.', '!']
 
+        #################################
+        # Md list-like sequences escaping
+        #
+        # For example ordered lists:
+        # 1. First item.
+        # 0. Second item.
+        # 9. Third item.
+        #
+        #################################
+
+        # tab to 4 spaces
+        source_line = source_line.replace('\t', ' ' * 4)
+
+        # find <spaces><number><dot><spaces>
+        invisible_character = r"&#8291;"
+        source_line = re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_character}\2\3", source_line)
+
+        #####################################################
         # If there are sections similar to html code,
         # which is specially processed by the Markdown parser
+        #####################################################
+
         markdown_left_angle_bracket_escape_sequence = r"&lt;"
         source_line = re.sub(r"\<", markdown_left_angle_bracket_escape_sequence, source_line)
 
@@ -223,13 +256,20 @@ def main(source: str, destination: str) -> None:
             # json (source) -> md
             for item in source_content:
                 validate_content(item)
-                conversion_result = converter.convert(
+                conversion_result = converter.convert_to_md(
                     item[FIELD_TYPES.type],
                     item[FIELD_TYPES.content])
                 md_representation.append(conversion_result)
 
             # md -> html (destination)
             text = ''.join(md_representation)
+
+            # todo: delete
+            #####################################
+            with open("/home/ilya/WorkSpace/Projects/json-to-html/test.md", 'w') as md:
+                md.write(text)
+            #####################################
+
             html_representation = markdown.markdown(text)
 
             # Insert id to headers
@@ -242,5 +282,4 @@ def main(source: str, destination: str) -> None:
 
 
 if __name__ == "__main__":
-    # TODO: todo
     main()
