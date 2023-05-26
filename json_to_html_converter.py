@@ -1,7 +1,10 @@
 # TODO: обрабатывать ошибку когда пути к файлам не были переданы,
 #       когда файлы не существуют,
 #       switch -> if else,
-#       выбор json->md или json->html
+#       выбор json->md или json->html,
+#       обработать случай когда более 4 пробелов - интерпретируется как
+#           \t и делается особое форматирование (не имеет смысла, надо как-то обрабатывать),
+#       добавить поддержку лидирующих пробелов в строке (в md они скипаются)
 
 import json
 import re
@@ -133,7 +136,7 @@ class Converter:
         }
 
         self.md_list_separator = '\n\n'
-        self.md_list_line_break = ' ' * 2     # double space in the EOL for line-break
+        self.md_line_break = ' ' * 2     # double space in the EOL for line-break
 
         self.md_new_line = '\n\n'
 
@@ -155,7 +158,7 @@ class Converter:
             case CONTENT_TYPES.text:
                 correct_version = self._correct_line(value)
                 # Make line breaks according to the markup
-                correct_version = correct_version.replace('\n', self.md_list_line_break + '\n')
+                correct_version = correct_version.replace('\n', self.md_line_break + '\n')
                 after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
             case CONTENT_TYPES.list:
                 # Attention!
@@ -166,7 +169,7 @@ class Converter:
                     one_list_item = list_items[i]
                     correct_version = self._correct_line(one_list_item)
                     # Make line breaks according to the markup
-                    correct_version = correct_version.replace('\n', self.md_list_line_break + '\n')
+                    correct_version = correct_version.replace('\n', self.md_line_break + '\n')
                     list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
 
                 after_conversion = self.md_new_line.join(list_items)
@@ -182,52 +185,62 @@ class Converter:
         """
         Escaping text that is to be converted and may contain special characters and Markdown constructs
         """
-        ##################################
-        # Single-character special symbols
-        ##################################
-
-        # Convert self.md_special_symbols to one string "...<symbols>..."
-        # Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
-        # Every special symbol must be concatenated with '\' symbol for escaping
-        # Be careful with '\', '\\' and raw Python string in this code!
-        single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
-        assert single_character_pattern
-
-        one_char_pattern = r"([{}])".format(single_character_pattern)
-        source_line = re.sub(one_char_pattern, r"\\\1", source_line)
 
         # TODO: 1) -done- всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
-        #       2) всякие варианты с #
+        #       2) -done- всякие варианты с #
         #       3) особые случаи со скобками (например ![Alt text](/path/to/img.jpg))
         #       4) посмотреть где каждая скобка используется в особых случаях
         #       Полный список
         #           List of special characters: ['#', '*', '-', '+', '\\', '_',
         #                                       '{', '}', '[', ']', '(', ')', '#', '.', '!']
 
-        #################################
-        # Md list-like sequences escaping
-        #
-        # For example ordered lists:
-        # 1. First item.
-        # 0. Second item.
-        # 9. Third item.
-        #
-        #################################
+        def escape_single_characters(to_correct: str) -> str:
+            # Convert self.md_special_symbols to one string "...<symbols>..."
+            # Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
+            # Every special symbol must be concatenated with '\' symbol for escaping
+            # Be careful with '\', '\\' and raw Python string in this code!
+            single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
+            assert single_character_pattern
 
-        # tab to 4 spaces
-        source_line = source_line.replace('\t', ' ' * 4)
+            one_char_pattern = r"([{}])".format(single_character_pattern)
+            return re.sub(one_char_pattern, r"\\\1", to_correct)
 
-        # find <spaces><number><dot><spaces>
-        invisible_character = r"&#8291;"
-        source_line = re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_character}\2\3", source_line)
+        def escape_headers(to_correct: str) -> str:
+            ########################
+            # Escape sequences like:
+            #   #...# Heading
+            ########################
+            invisible_character = r"&#8291;"
+            return re.sub(r"[^\n]( *)(#+)( +)", fr"\1{invisible_character}\2\3", to_correct)
 
-        #####################################################
-        # If there are sections similar to html code,
-        # which is specially processed by the Markdown parser
-        #####################################################
+        def escape_list_special_sequences(to_correct: str) -> str:
+            #################################
+            # Md list-like sequences escaping
+            #
+            # For example ordered lists:
+            # 1. First item.
+            # 0. Second item.
+            # 9. Third item.
+            #
+            #################################
+            # find <spaces><number><dot><spaces>
+            invisible_character = r"&#8291;"
+            return re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_character}\2\3", to_correct)
 
-        markdown_left_angle_bracket_escape_sequence = r"&lt;"
-        source_line = re.sub(r"\<", markdown_left_angle_bracket_escape_sequence, source_line)
+        def escape_html_like_sequences(to_correct: str) -> str:
+            #####################################################
+            # If there are sections similar to html code,
+            # which is specially processed by the Markdown parser
+            #####################################################
+            markdown_left_angle_bracket_escape_sequence = r"&lt;"
+            return re.sub(r"<", markdown_left_angle_bracket_escape_sequence, to_correct)
+
+        source_line = escape_single_characters(source_line)
+
+        source_line = escape_headers(source_line)
+        source_line = escape_list_special_sequences(source_line)
+
+        source_line = escape_html_like_sequences(source_line)
 
         return source_line
 
