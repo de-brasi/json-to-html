@@ -1,14 +1,14 @@
 # TODO: обрабатывать ошибку когда пути к файлам не были переданы,
-#       когда файлы не существуют,
 #       выбор json->md или json->html,
 #       обработать случай когда более 4 пробелов - интерпретируется как
 #           \t и делается особое форматирование (не имеет смысла, надо как-то обрабатывать),
 #       добавить поддержку лидирующих пробелов в строке (в md они скипаются)
 
-import json
 import re
-import markdown
+import os
+import json
 import click
+import markdown
 
 from typing import Dict
 from dataclasses import dataclass
@@ -247,13 +247,41 @@ class Converter:
 @click.command()
 @click.option('--source', '-s', help="Path to the source file directory")
 @click.option('--destination', '-d', help="Path to the directory for the output file")
-def main(source: str, destination: str) -> None:
+def main(source: str = None, destination: str = None) -> None:
+    def check_paths_existing(source_file_path: str, destination_file_path: str) -> None:
+        """
+        Check if all paths passed
+        """
+        if not all([source_file_path, destination_file_path]):
+            raise RuntimeError("Not enough files paths!")
+
+    def check_paths_correctness(source_file_path: str, destination_file_path: str) -> None:
+        """
+        Check if files existing and source file has correct extension
+        """
+        for checked_file in (source_file_path, destination_file_path):
+            if not os.path.isfile(checked_file):
+                raise RuntimeError(f"File with path {checked_file} is not exist!")
+
+        source_file_extension = source_file_path.split('.')[-1]
+        try:
+            assert source_file_extension == 'json'
+        except AssertionError:
+            raise RuntimeError(f"Unexpected extension of source file({source_file_extension}). "
+                               f"Supported: json")
+
     def get_id_with_increment() -> str:
         nonlocal cur_header_id_num, header_id_prefix
 
         res = header_id_prefix + str(cur_header_id_num)
         cur_header_id_num += 1
         return res
+
+    #############################################
+    # Verifying
+    check_paths_existing(source, destination)
+    check_paths_correctness(source, destination)
+    #############################################
 
     cur_header_id_num = 0
     header_id_prefix = "header"
