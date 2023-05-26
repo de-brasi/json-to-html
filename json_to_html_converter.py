@@ -1,6 +1,5 @@
 # TODO: обрабатывать ошибку когда пути к файлам не были переданы,
 #       когда файлы не существуют,
-#       switch -> if else,
 #       выбор json->md или json->html,
 #       обработать случай когда более 4 пробелов - интерпретируется как
 #           \t и делается особое форматирование (не имеет смысла, надо как-то обрабатывать),
@@ -148,35 +147,35 @@ class Converter:
         self.md_special_symbols = ['*', '-', '+']
 
     def convert_to_md(self, value_type: str, value: str) -> str:
-        after_conversion = ""
-
-        match value_type:
-            case CONTENT_TYPES.title:
-                # h1 header using
-                after_conversion = \
-                    self.markup_patterns[CONTENT_TYPES.title].format(value)
-            case CONTENT_TYPES.text:
-                correct_version = self._correct_line(value)
+        if value_type == CONTENT_TYPES.title:
+            # h1 header using
+            after_conversion = \
+                self.markup_patterns[CONTENT_TYPES.title].format(value)
+        elif value_type == CONTENT_TYPES.text:
+            correct_version = self._correct_line(value)
+            # Make line breaks according to the markup
+            correct_version = correct_version.replace('\n', self.md_line_break + '\n')
+            after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
+        elif value_type == CONTENT_TYPES.list:
+            # Attention!
+            # Symbols denoting a new line may change and depend on the operation of the ML service
+            list_items = [value for value in
+                          value.split(self.md_list_separator) if value]
+            for i in range(len(list_items)):
+                one_list_item = list_items[i]
+                correct_version = self._correct_line(one_list_item)
                 # Make line breaks according to the markup
                 correct_version = correct_version.replace('\n', self.md_line_break + '\n')
-                after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
-            case CONTENT_TYPES.list:
-                # Attention!
-                # Symbols denoting a new line may change and depend on the operation of the ML service
-                list_items = [value for value in
-                              value.split(self.md_list_separator) if value]
-                for i in range(len(list_items)):
-                    one_list_item = list_items[i]
-                    correct_version = self._correct_line(one_list_item)
-                    # Make line breaks according to the markup
-                    correct_version = correct_version.replace('\n', self.md_line_break + '\n')
-                    list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
+                list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
 
-                after_conversion = self.md_new_line.join(list_items)
-                after_conversion += self.md_new_line
-            case CONTENT_TYPES.image:
-                after_conversion = \
-                    self.markup_patterns[CONTENT_TYPES.image].format(value)
+            after_conversion = self.md_new_line.join(list_items)
+            after_conversion += self.md_new_line
+        elif value_type == CONTENT_TYPES.image:
+            after_conversion = \
+                self.markup_patterns[CONTENT_TYPES.image].format(value)
+        else:
+            raise RuntimeError(f"Unexpected type {value_type}! "
+                               f"Possible values: {CONTENT_TYPES.additional_function_get_members()}")
 
         after_conversion += self.md_new_line
         return after_conversion
