@@ -125,7 +125,7 @@ def validate_content(to_validate: Dict) -> None:
                                       f"Here is the list of allowed types: {expected_fields_value_types}")
 
 
-class Converter:
+class ToMarkdownConverter:
     def __init__(self):
         self.markup_patterns = {
             CONTENT_TYPES.text: "{}",
@@ -182,7 +182,8 @@ class Converter:
 
     def _correct_line(self, source_line) -> str:
         """
-        Escaping text that is to be converted and may contain special characters and Markdown constructs
+        Escaping text that is to be converted and may contain special characters and Markdown constructs.
+        More about Markdown syntax in https://daringfireball.net/projects/markdown/syntax.text.
         """
 
         # TODO: 1) -done- всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
@@ -193,61 +194,84 @@ class Converter:
         #           List of special characters: ['#', '*', '-', '+', '\\', '_',
         #                                       '{', '}', '[', ']', '(', ')', '#', '.', '!']
 
-        def escape_single_characters(to_correct: str) -> str:
-            # Convert self.md_special_symbols to one string "...<symbols>..."
-            # Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
-            # Every special symbol must be concatenated with '\' symbol for escaping
-            # Be careful with '\', '\\' and raw Python string in this code!
+        def escape_md_single_special_characters(to_correct: str) -> str:
+            """
+            Convert self.md_special_symbols to one string "...<symbols>..."
+            Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
+            Every special symbol must be concatenated with '\' symbol for escaping
+            Be careful with '\', '\\' and raw Python string in this code!
+            """
             single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
             assert single_character_pattern
 
             one_char_pattern = r"([{}])".format(single_character_pattern)
             return re.sub(one_char_pattern, r"\\\1", to_correct)
 
-        def escape_headers(to_correct: str) -> str:
-            ########################
-            # Escape sequences like:
-            #   #...# Heading
-            ########################
-            invisible_character = r"&#8291;"
-            return re.sub(r"[^\n]( *)(#+)( +)", fr"\1{invisible_character}\2\3", to_correct)
+        def escape_md_headers(to_correct: str) -> str:
+            """
+            Escape sequences like:
+              #...# Heading
+            """
+            invisible_unicode_character = r"&#8291;"
+            return re.sub(r"[^\n]( *)(#+)( +)", fr"\1{invisible_unicode_character}\2\3", to_correct)
 
-        def escape_list_special_sequences(to_correct: str) -> str:
-            #################################
-            # Md list-like sequences escaping
-            #
-            # For example ordered lists:
-            # 1. First item.
-            # 0. Second item.
-            # 9. Third item.
-            #
-            #################################
+        def escape_md_list_special_sequences(to_correct: str) -> str:
+            """
+            Md list-like sequences escaping
+
+            For example ordered lists:
+            1. First item.
+            0. Second item.
+            9. Third item.
+            """
             # find <spaces><number><dot><spaces>
-            invisible_character = r"&#8291;"
-            return re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_character}\2\3", to_correct)
+            invisible_unicode_character = r"&#8291;"
+            return re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_unicode_character}\2\3", to_correct)
 
         def escape_html_like_sequences(to_correct: str) -> str:
-            #####################################################
-            # If there are sections similar to html code,
-            # which is specially processed by the Markdown parser
-            #####################################################
+            """
+            If there are sections similar to html code,
+            which is specially processed by the Markdown parser
+            """
             markdown_left_angle_bracket_escape_sequence = r"&lt;"
             return re.sub(r"<", markdown_left_angle_bracket_escape_sequence, to_correct)
 
-        source_line = escape_single_characters(source_line)
+        def escape_all_types_of_braces(to_correct: str) -> str:
+            """
+            Helps to escape all special Markdown sequences with any types of braces.
+            For example:
+                - links:  [mysite](http://some_site.some.url/)
+                - inline image syntax: ![mysite logo](http://some_site/favicon.png/ "optional title")
+            """
 
-        source_line = escape_headers(source_line)
-        source_line = escape_list_special_sequences(source_line)
+            # Leading back-slash because pure braces are metacharacters in regular expressions
+            unicode_codes = {
+                r'\{': 123, r'\}': 125, r'\[': 91, r'\]': 93, r'\(': 40, r'\)': 41
+            }
 
+            for brace, unicode_number in unicode_codes.items():
+                special_unicode_character = fr"&#{unicode_number};"
+                to_correct = re.sub(fr"{brace}", special_unicode_character, to_correct)
+
+            return to_correct
+
+        source_line = escape_md_single_special_characters(source_line)
+        source_line = escape_md_headers(source_line)
+        source_line = escape_md_list_special_sequences(source_line)
         source_line = escape_html_like_sequences(source_line)
+        source_line = escape_all_types_of_braces(source_line)
 
         return source_line
 
 
 @click.command()
 @click.option('--source', '-s', help="Path to the source file directory")
-@click.option('--destination', '-d', help="Path to the directory for the output file")
+@click.option('--destination', '-d', help="Path to the output file. "
+                                          "It will be created if not exist such file in existing directory")
 def main(source: str = None, destination: str = None) -> None:
+    def get_file_extension(file_path: str) -> str:
+        return file_path.split('.')[-1]
+
     def check_paths_existing(source_file_path: str, destination_file_path: str) -> None:
         """
         Check if all paths passed
@@ -259,23 +283,30 @@ def main(source: str = None, destination: str = None) -> None:
         """
         Check if files existing and source file has correct extension
         """
-        for checked_file in (source_file_path, destination_file_path):
-            if not os.path.isfile(checked_file):
-                raise RuntimeError(f"File with path {checked_file} is not exist!")
+        if not os.path.isfile(source_file_path):
+            raise RuntimeError(f"File with path '{source_file_path}' is not exist!")
 
-        source_file_extension = source_file_path.split('.')[-1]
-        try:
-            assert source_file_extension == 'json'
-        except AssertionError:
-            raise RuntimeError(f"Unexpected extension of source file({source_file_extension}). "
+        source_file_extension = get_file_extension(source_file_path)
+        if source_file_extension != 'json':
+            raise RuntimeError(f"Unexpected extension of source file: '{source_file_extension}'. "
                                f"Supported: json")
 
+        # Check if destination file can be opened or create
+        try:
+            with open(destination_file_path, 'a'):
+                pass
+        except FileNotFoundError:
+            raise RuntimeError(f"No such directory: '{destination_file_path}'.")
+
     def get_id_with_increment() -> str:
+        # todo: create endless generator
         nonlocal cur_header_id_num, header_id_prefix
 
         res = header_id_prefix + str(cur_header_id_num)
         cur_header_id_num += 1
         return res
+
+    # TODO: converting mode depends on destination file extension
 
     #############################################
     # Verifying
@@ -286,7 +317,7 @@ def main(source: str = None, destination: str = None) -> None:
     cur_header_id_num = 0
     header_id_prefix = "header"
 
-    converter = Converter()
+    converter = ToMarkdownConverter()
 
     with open(source, 'r') as src:
         with open(destination, 'w') as dst:
