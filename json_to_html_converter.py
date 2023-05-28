@@ -1,9 +1,5 @@
-# TODO: -done- обрабатывать ошибку когда пути к файлам не были переданы,
-#       выбор json->md или json->html,
-#       обработать случай когда более 4 пробелов - интерпретируется как
-#           \t и делается особое форматирование (не имеет смысла, надо как-то обрабатывать),
-#       добавить поддержку лидирующих пробелов в строке (в md они скипаются),
-#       ловить ошибки и выводить текстом их содержимое, не пробрасывая наружу
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import re
 import os
@@ -158,6 +154,12 @@ class Converter:
         self.html_id_generator = self._html_headers_id_generator()
 
     def convert_to_markdown(self, text_type: str, text: str) -> str:
+        # Avoid discarding leading spaces
+        match_leading_spaces = re.match(r"^\s*", text)
+        match_count = len(match_leading_spaces.group(0))
+        unicode_space_symbol = r"&#127;"
+        text = re.sub(r"^\s*", unicode_space_symbol * match_count, text)
+
         if text_type == CONTENT_TYPES.title:
             # h1 header using
             after_conversion = \
@@ -192,7 +194,7 @@ class Converter:
         return after_conversion
 
     def convert_to_html(self, text_type: str, text: str):
-        # todo: draft
+        # Lazy converting: json -> md -> html
         md_repr = self.convert_to_markdown(text_type, text)
         after_html_converting = markdown.markdown(md_repr)
 
@@ -328,23 +330,18 @@ def main(source: str = None, destination: str = None) -> None:
         if file_extension not in required_extensions:
             raise RuntimeError(f"Unexpected extension: '{file_extension}'. Required: {required_extensions}.")
 
-    # def get_id_with_increment() -> str:
-    #     # todo: create endless generator
-    #     nonlocal cur_header_id_num, header_id_prefix
-    #
-    #     res = header_id_prefix + str(cur_header_id_num)
-    #     cur_header_id_num += 1
-    #     return res
-
     #############################################
     # Verifying
-    check_paths_existing(source, destination)
-    check_paths_correctness(source, destination)
-    check_destination_path_extension(destination)
+    try:
+        check_paths_existing(source, destination)
+        check_paths_correctness(source, destination)
+        check_destination_path_extension(destination)
+    except RuntimeError as error:
+        print(str(error))
+        return
     #############################################
 
     converter = Converter()
-    # TODO: converting mode depends on destination file extension
     converting_extension = get_file_extension(destination)
 
     if converting_extension == 'html':
@@ -362,42 +359,6 @@ def main(source: str = None, destination: str = None) -> None:
                 item[FIELD_TYPES.content]
             )
             dst.write(conversion_result)
-
-    #######################################33
-    # cur_header_id_num = 0
-    # header_id_prefix = "header"
-    #
-    # with open(source, 'r') as src:
-    #     with open(destination, 'w') as dst:
-    #         source_content = json.load(src)
-    #         md_representation = []
-    #
-    #         # json (source) -> md
-    #         for item in source_content:
-    #             validate_content(item)
-    #             conversion_result = converter.convert_to_markdown(
-    #                 item[FIELD_TYPES.type],
-    #                 item[FIELD_TYPES.content])
-    #             md_representation.append(conversion_result)
-    #
-    #         # md -> html (destination)
-    #         text = ''.join(md_representation)
-    #
-    #         # todo: delete
-    #         #####################################
-    #         with open("/home/ilya/WorkSpace/Projects/json-to-html/test.md", 'w') as md:
-    #             md.write(text)
-    #         #####################################
-    #
-    #         html_representation = markdown.markdown(text)
-    #
-    #         # Insert id to headers
-    #         header_pattern = r"<h1>"
-    #         html = re.sub(header_pattern,
-    #                       lambda exp: r'<h1 id="{}">'.format(get_id_with_increment()),
-    #                       html_representation)
-    #
-    #         dst.write(html)
 
 
 if __name__ == "__main__":
