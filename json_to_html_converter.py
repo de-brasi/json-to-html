@@ -1,8 +1,9 @@
-# TODO: обрабатывать ошибку когда пути к файлам не были переданы,
+# TODO: -done- обрабатывать ошибку когда пути к файлам не были переданы,
 #       выбор json->md или json->html,
 #       обработать случай когда более 4 пробелов - интерпретируется как
 #           \t и делается особое форматирование (не имеет смысла, надо как-то обрабатывать),
-#       добавить поддержку лидирующих пробелов в строке (в md они скипаются)
+#       добавить поддержку лидирующих пробелов в строке (в md они скипаются),
+#       ловить ошибки и выводить текстом их содержимое, не пробрасывая наружу
 
 import re
 import os
@@ -125,8 +126,12 @@ def validate_content(to_validate: Dict) -> None:
                                       f"Here is the list of allowed types: {expected_fields_value_types}")
 
 
-class ToMarkdownConverter:
+class Converter:
     def __init__(self):
+        #########################
+        # For Markdown converting
+        #########################
+
         self.markup_patterns = {
             CONTENT_TYPES.text: "{}",
             CONTENT_TYPES.title: "# {}",
@@ -146,53 +151,72 @@ class ToMarkdownConverter:
         # Maybe it depends on the version of the Markdown processor.
         self.md_special_symbols = ['*', '-', '+']
 
-    def convert_to_md(self, value_type: str, value: str) -> str:
-        if value_type == CONTENT_TYPES.title:
+        #####################
+        # For HTML converting
+        #####################
+        self.html_header_prefix = "header"
+        self.html_id_generator = self._html_headers_id_generator()
+
+    def convert_to_markdown(self, text_type: str, text: str) -> str:
+        if text_type == CONTENT_TYPES.title:
             # h1 header using
             after_conversion = \
-                self.markup_patterns[CONTENT_TYPES.title].format(value)
-        elif value_type == CONTENT_TYPES.text:
-            correct_version = self._correct_line(value)
+                self.markup_patterns[CONTENT_TYPES.title].format(text)
+        elif text_type == CONTENT_TYPES.text:
+            correct_version = self._correct_line_according_markdown_syntax(text)
             # Make line breaks according to the markup
             correct_version = correct_version.replace('\n', self.md_line_break + '\n')
             after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
-        elif value_type == CONTENT_TYPES.list:
+        elif text_type == CONTENT_TYPES.list:
             # Attention!
             # Symbols denoting a new line may change and depend on the operation of the ML service
             list_items = [value for value in
-                          value.split(self.md_list_separator) if value]
+                          text.split(self.md_list_separator) if value]
             for i in range(len(list_items)):
                 one_list_item = list_items[i]
-                correct_version = self._correct_line(one_list_item)
+                correct_version = self._correct_line_according_markdown_syntax(one_list_item)
                 # Make line breaks according to the markup
                 correct_version = correct_version.replace('\n', self.md_line_break + '\n')
                 list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
 
             after_conversion = self.md_new_line.join(list_items)
             after_conversion += self.md_new_line
-        elif value_type == CONTENT_TYPES.image:
+        elif text_type == CONTENT_TYPES.image:
             after_conversion = \
-                self.markup_patterns[CONTENT_TYPES.image].format(value)
+                self.markup_patterns[CONTENT_TYPES.image].format(text)
         else:
-            raise RuntimeError(f"Unexpected type {value_type}! "
+            raise RuntimeError(f"Unexpected type {text_type}! "
                                f"Possible values: {CONTENT_TYPES.additional_function_get_members()}")
 
         after_conversion += self.md_new_line
         return after_conversion
 
-    def _correct_line(self, source_line) -> str:
+    def convert_to_html(self, text_type: str, text: str):
+        # todo: draft
+        md_repr = self.convert_to_markdown(text_type, text)
+        after_html_converting = markdown.markdown(md_repr)
+
+        if text_type == CONTENT_TYPES.title:
+            header_pattern = r"<h1>"
+
+            # set unique id
+            after_html_converting = re.sub(header_pattern,
+                                           r'<h1 id="{}">'.format(next(self.html_id_generator)),
+                                           after_html_converting)
+
+        return after_html_converting
+
+    def _html_headers_id_generator(self):
+        id_value = 0
+        while True:
+            yield self.html_header_prefix + str(id_value)
+            id_value += 1
+
+    def _correct_line_according_markdown_syntax(self, source_str) -> str:
         """
         Escaping text that is to be converted and may contain special characters and Markdown constructs.
         More about Markdown syntax in https://daringfireball.net/projects/markdown/syntax.text.
         """
-
-        # TODO: 1) -done- всякие случаи с 2ми символами типа "1.", и тд (в основном для листов)
-        #       2) -done- всякие варианты с #
-        #       3) особые случаи со скобками (например ![Alt text](/path/to/img.jpg))
-        #       4) посмотреть где каждая скобка используется в особых случаях
-        #       Полный список
-        #           List of special characters: ['#', '*', '-', '+', '\\', '_',
-        #                                       '{', '}', '[', ']', '(', ')', '#', '.', '!']
 
         def escape_md_single_special_characters(to_correct: str) -> str:
             """
@@ -255,13 +279,13 @@ class ToMarkdownConverter:
 
             return to_correct
 
-        source_line = escape_md_single_special_characters(source_line)
-        source_line = escape_md_headers(source_line)
-        source_line = escape_md_list_special_sequences(source_line)
-        source_line = escape_html_like_sequences(source_line)
-        source_line = escape_all_types_of_braces(source_line)
+        source_str = escape_md_single_special_characters(source_str)
+        source_str = escape_md_headers(source_str)
+        source_str = escape_md_list_special_sequences(source_str)
+        source_str = escape_html_like_sequences(source_str)
+        source_str = escape_all_types_of_braces(source_str)
 
-        return source_line
+        return source_str
 
 
 @click.command()
@@ -298,58 +322,82 @@ def main(source: str = None, destination: str = None) -> None:
         except FileNotFoundError:
             raise RuntimeError(f"No such directory: '{destination_file_path}'.")
 
-    def get_id_with_increment() -> str:
-        # todo: create endless generator
-        nonlocal cur_header_id_num, header_id_prefix
+    def check_destination_path_extension(file_path: str) -> None:
+        required_extensions = ('md', 'html')
+        file_extension = get_file_extension(file_path)
+        if file_extension not in required_extensions:
+            raise RuntimeError(f"Unexpected extension: '{file_extension}'. Required: {required_extensions}.")
 
-        res = header_id_prefix + str(cur_header_id_num)
-        cur_header_id_num += 1
-        return res
-
-    # TODO: converting mode depends on destination file extension
+    # def get_id_with_increment() -> str:
+    #     # todo: create endless generator
+    #     nonlocal cur_header_id_num, header_id_prefix
+    #
+    #     res = header_id_prefix + str(cur_header_id_num)
+    #     cur_header_id_num += 1
+    #     return res
 
     #############################################
     # Verifying
     check_paths_existing(source, destination)
     check_paths_correctness(source, destination)
+    check_destination_path_extension(destination)
     #############################################
 
-    cur_header_id_num = 0
-    header_id_prefix = "header"
+    converter = Converter()
+    # TODO: converting mode depends on destination file extension
+    converting_extension = get_file_extension(destination)
 
-    converter = ToMarkdownConverter()
+    if converting_extension == 'html':
+        converting_function = converter.convert_to_html
+    else:
+        # converting_extension == md
+        converting_function = converter.convert_to_markdown
 
-    with open(source, 'r') as src:
-        with open(destination, 'w') as dst:
-            source_content = json.load(src)
-            md_representation = []
+    with open(source, 'r') as src, open(destination, 'w') as dst:
+        source_content = json.load(src)
+        for item in source_content:
+            validate_content(item)
+            conversion_result = converting_function(
+                item[FIELD_TYPES.type],
+                item[FIELD_TYPES.content]
+            )
+            dst.write(conversion_result)
 
-            # json (source) -> md
-            for item in source_content:
-                validate_content(item)
-                conversion_result = converter.convert_to_md(
-                    item[FIELD_TYPES.type],
-                    item[FIELD_TYPES.content])
-                md_representation.append(conversion_result)
-
-            # md -> html (destination)
-            text = ''.join(md_representation)
-
-            # todo: delete
-            #####################################
-            with open("/home/ilya/WorkSpace/Projects/json-to-html/test.md", 'w') as md:
-                md.write(text)
-            #####################################
-
-            html_representation = markdown.markdown(text)
-
-            # Insert id to headers
-            header_pattern = r"<h1>"
-            html = re.sub(header_pattern,
-                          lambda exp: r'<h1 id="{}">'.format(get_id_with_increment()),
-                          html_representation)
-
-            dst.write(html)
+    #######################################33
+    # cur_header_id_num = 0
+    # header_id_prefix = "header"
+    #
+    # with open(source, 'r') as src:
+    #     with open(destination, 'w') as dst:
+    #         source_content = json.load(src)
+    #         md_representation = []
+    #
+    #         # json (source) -> md
+    #         for item in source_content:
+    #             validate_content(item)
+    #             conversion_result = converter.convert_to_markdown(
+    #                 item[FIELD_TYPES.type],
+    #                 item[FIELD_TYPES.content])
+    #             md_representation.append(conversion_result)
+    #
+    #         # md -> html (destination)
+    #         text = ''.join(md_representation)
+    #
+    #         # todo: delete
+    #         #####################################
+    #         with open("/home/ilya/WorkSpace/Projects/json-to-html/test.md", 'w') as md:
+    #             md.write(text)
+    #         #####################################
+    #
+    #         html_representation = markdown.markdown(text)
+    #
+    #         # Insert id to headers
+    #         header_pattern = r"<h1>"
+    #         html = re.sub(header_pattern,
+    #                       lambda exp: r'<h1 id="{}">'.format(get_id_with_increment()),
+    #                       html_representation)
+    #
+    #         dst.write(html)
 
 
 if __name__ == "__main__":
