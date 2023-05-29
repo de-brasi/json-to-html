@@ -1,7 +1,11 @@
-import json
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import re
-import markdown
+import os
+import json
 import click
+import markdown
 
 from typing import Dict
 from dataclasses import dataclass
@@ -120,6 +124,10 @@ def validate_content(to_validate: Dict) -> None:
 
 class Converter:
     def __init__(self):
+        #########################
+        # For Markdown converting
+        #########################
+
         self.markup_patterns = {
             CONTENT_TYPES.text: "{}",
             CONTENT_TYPES.title: "# {}",
@@ -128,7 +136,7 @@ class Converter:
         }
 
         self.md_list_separator = '\n\n'
-        self.md_list_line_break = ' ' * 2     # double space in the EOL for line-break
+        self.md_line_break = ' ' * 2     # double space in the EOL for line-break
 
         self.md_new_line = '\n\n'
 
@@ -136,99 +144,221 @@ class Converter:
         # Attention! List of special characters:
         #   ['#', '*', '-', '+', '\\', '_', '{', '}', '[', ']', '(', ')', '#', '.', '!']
         # For some reason the local Markdown parser doesn't require escaping some characters.
-        # Maybe it depends on the version of the Markdown engine.
+        # Maybe it depends on the version of the Markdown processor.
         self.md_special_symbols = ['*', '-', '+']
 
-    def convert(self, value_type: str, value: str) -> str:
-        after_conversion = ""
+        #####################
+        # For HTML converting
+        #####################
+        self.html_header_prefix = "header"
+        self.html_id_generator = self._html_headers_id_generator()
 
-        match value_type:
-            case CONTENT_TYPES.title:
-                # h1 header using
-                after_conversion = \
-                    self.markup_patterns[CONTENT_TYPES.title].format(value)
-            case CONTENT_TYPES.text:
-                value = self._correct_line(value)
-                after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(value)
-            case CONTENT_TYPES.list:
-                list_items = [value for value in
-                              value.split(self.md_list_separator) if value]
-                for i in range(len(list_items)):
-                    one_list_item = list_items[i]
-                    correct_version = self._correct_line(one_list_item)
-                    correct_version = correct_version.replace('\n', self.md_list_line_break + '\n')
-                    list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
+    def convert_to_markdown(self, text_type: str, text: str) -> str:
+        # Avoid discarding leading spaces
+        match_leading_spaces = re.match(r"^\s*", text)
+        match_count = len(match_leading_spaces.group(0))
+        unicode_space_symbol = r"&#127;"
+        text = re.sub(r"^\s*", unicode_space_symbol * match_count, text)
 
-                after_conversion = self.md_new_line.join(list_items)
-                after_conversion += self.md_new_line
-            case CONTENT_TYPES.image:
-                after_conversion = \
-                    self.markup_patterns[CONTENT_TYPES.image].format(value)
+        if text_type == CONTENT_TYPES.title:
+            # h1 header using
+            after_conversion = \
+                self.markup_patterns[CONTENT_TYPES.title].format(text)
+        elif text_type == CONTENT_TYPES.text:
+            correct_version = self._correct_line_according_markdown_syntax(text)
+            # Make line breaks according to the markup
+            correct_version = correct_version.replace('\n', self.md_line_break + '\n')
+            after_conversion = self.markup_patterns[CONTENT_TYPES.text].format(correct_version)
+        elif text_type == CONTENT_TYPES.list:
+            # Attention!
+            # Symbols denoting a new line may change and depend on the operation of the ML service
+            list_items = [value for value in
+                          text.split(self.md_list_separator) if value]
+            for i in range(len(list_items)):
+                one_list_item = list_items[i]
+                correct_version = self._correct_line_according_markdown_syntax(one_list_item)
+                # Make line breaks according to the markup
+                correct_version = correct_version.replace('\n', self.md_line_break + '\n')
+                list_items[i] = self.markup_patterns[CONTENT_TYPES.list].format(correct_version)
+
+            after_conversion = self.md_new_line.join(list_items)
+            after_conversion += self.md_new_line
+        elif text_type == CONTENT_TYPES.image:
+            after_conversion = \
+                self.markup_patterns[CONTENT_TYPES.image].format(text)
+        else:
+            raise RuntimeError(f"Unexpected type {text_type}! "
+                               f"Possible values: {CONTENT_TYPES.additional_function_get_members()}")
 
         after_conversion += self.md_new_line
         return after_conversion
 
-    def _correct_line(self, source_line) -> str:
+    def convert_to_html(self, text_type: str, text: str):
+        # Lazy converting: json -> md -> html
+        md_repr = self.convert_to_markdown(text_type, text)
+        after_html_converting = markdown.markdown(md_repr)
 
-        # Convert self.md_special_symbols to one string "...<symbols>..."
-        # Make with it md pattern "[...<symbols>...]" and remember detected occurrence with ()
+        if text_type == CONTENT_TYPES.title:
+            header_pattern = r"<h1>"
 
-        # Every special symbol must be concatenated with '\' symbol for escaping
-        # Be careful with '\', '\\' and raw Python string in this code!
-        single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
-        assert single_character_pattern
+            # set unique id
+            after_html_converting = re.sub(header_pattern,
+                                           r'<h1 id="{}">'.format(next(self.html_id_generator)),
+                                           after_html_converting)
 
-        pattern = r"([{}])".format(single_character_pattern)
-        source_line = re.sub(r"([{}])".format(single_character_pattern), r"\\\1", source_line)
+        return after_html_converting
 
-        # If there are sections similar to html code,
-        # which is specially processed by the Markdown parser
-        markdown_left_angle_bracket_escape_sequence = r"&lt;"
-        source_line = re.sub(r"\<", markdown_left_angle_bracket_escape_sequence, source_line)
+    def _html_headers_id_generator(self):
+        id_value = 0
+        while True:
+            yield self.html_header_prefix + str(id_value)
+            id_value += 1
 
-        return source_line
+    def _correct_line_according_markdown_syntax(self, source_str) -> str:
+        """
+        Escaping text that is to be converted and may contain special characters and Markdown constructs.
+        More about Markdown syntax in https://daringfireball.net/projects/markdown/syntax.text.
+        """
+
+        def escape_md_single_special_characters(to_correct: str) -> str:
+            """
+            Convert self.md_special_symbols to one string "...<symbols>..."
+            Make with it md one_char_pattern "[...<symbols>...]" and remember detected occurrence with ().
+            Every special symbol must be concatenated with '\' symbol for escaping
+            Be careful with '\', '\\' and raw Python string in this code!
+            """
+            single_character_pattern = ''.join(['\\' + char for char in self.md_special_symbols])
+            assert single_character_pattern
+
+            one_char_pattern = r"([{}])".format(single_character_pattern)
+            return re.sub(one_char_pattern, r"\\\1", to_correct)
+
+        def escape_md_headers(to_correct: str) -> str:
+            """
+            Escape sequences like:
+              #...# Heading
+            """
+            invisible_unicode_character = r"&#8291;"
+            return re.sub(r"[^\n]( *)(#+)( +)", fr"\1{invisible_unicode_character}\2\3", to_correct)
+
+        def escape_md_list_special_sequences(to_correct: str) -> str:
+            """
+            Md list-like sequences escaping
+
+            For example ordered lists:
+            1. First item.
+            0. Second item.
+            9. Third item.
+            """
+            # find <spaces><number><dot><spaces>
+            invisible_unicode_character = r"&#8291;"
+            return re.sub(r"( *)([0-9]+\.)( +)", fr"\1{invisible_unicode_character}\2\3", to_correct)
+
+        def escape_html_like_sequences(to_correct: str) -> str:
+            """
+            If there are sections similar to html code,
+            which is specially processed by the Markdown parser
+            """
+            markdown_left_angle_bracket_escape_sequence = r"&lt;"
+            return re.sub(r"<", markdown_left_angle_bracket_escape_sequence, to_correct)
+
+        def escape_all_types_of_braces(to_correct: str) -> str:
+            """
+            Helps to escape all special Markdown sequences with any types of braces.
+            For example:
+                - links:  [mysite](http://some_site.some.url/)
+                - inline image syntax: ![mysite logo](http://some_site/favicon.png/ "optional title")
+            """
+
+            # Leading back-slash because pure braces are metacharacters in regular expressions
+            unicode_codes = {
+                r'\{': 123, r'\}': 125, r'\[': 91, r'\]': 93, r'\(': 40, r'\)': 41
+            }
+
+            for brace, unicode_number in unicode_codes.items():
+                special_unicode_character = fr"&#{unicode_number};"
+                to_correct = re.sub(fr"{brace}", special_unicode_character, to_correct)
+
+            return to_correct
+
+        source_str = escape_md_single_special_characters(source_str)
+        source_str = escape_md_headers(source_str)
+        source_str = escape_md_list_special_sequences(source_str)
+        source_str = escape_html_like_sequences(source_str)
+        source_str = escape_all_types_of_braces(source_str)
+
+        return source_str
 
 
 @click.command()
 @click.option('--source', '-s', help="Path to the source file directory")
-@click.option('--destination', '-d', help="Path to the directory for the output file")
-def main(source: str, destination: str) -> None:
-    def get_id_with_increment() -> str:
-        nonlocal cur_header_id_num, header_id_prefix
+@click.option('--destination', '-d', help="Path to the output file. "
+                                          "It will be created if not exist such file in existing directory")
+def main(source: str = None, destination: str = None) -> None:
+    def get_file_extension(file_path: str) -> str:
+        return file_path.split('.')[-1]
 
-        res = header_id_prefix + str(cur_header_id_num)
-        cur_header_id_num += 1
-        return res
+    def check_paths_existing(source_file_path: str, destination_file_path: str) -> None:
+        """
+        Check if all paths passed
+        """
+        if not all([source_file_path, destination_file_path]):
+            raise RuntimeError("Not enough files paths!")
 
-    cur_header_id_num = 0
-    header_id_prefix = "header"
+    def check_paths_correctness(source_file_path: str, destination_file_path: str) -> None:
+        """
+        Check if files existing and source file has correct extension
+        """
+        if not os.path.isfile(source_file_path):
+            raise RuntimeError(f"File with path '{source_file_path}' is not exist!")
+
+        source_file_extension = get_file_extension(source_file_path)
+        if source_file_extension != 'json':
+            raise RuntimeError(f"Unexpected extension of source file: '{source_file_extension}'. "
+                               f"Supported: json")
+
+        # Check if destination file can be opened or create
+        try:
+            with open(destination_file_path, 'a'):
+                pass
+        except FileNotFoundError:
+            raise RuntimeError(f"No such directory: '{destination_file_path}'.")
+
+    def check_destination_path_extension(file_path: str) -> None:
+        required_extensions = ('md', 'html')
+        file_extension = get_file_extension(file_path)
+        if file_extension not in required_extensions:
+            raise RuntimeError(f"Unexpected extension: '{file_extension}'. Required: {required_extensions}.")
+
+    #############################################
+    # Verifying
+    try:
+        check_paths_existing(source, destination)
+        check_paths_correctness(source, destination)
+        check_destination_path_extension(destination)
+    except RuntimeError as error:
+        print(str(error))
+        return
+    #############################################
 
     converter = Converter()
+    converting_extension = get_file_extension(destination)
 
-    with open(source, 'r') as src:
-        with open(destination, 'w') as dst:
-            source_content = json.load(src)
-            md_representation = []
+    if converting_extension == 'html':
+        converting_function = converter.convert_to_html
+    else:
+        # converting_extension == md
+        converting_function = converter.convert_to_markdown
 
-            # json (source) -> md
-            for item in source_content:
-                validate_content(item)
-                conversion_result = converter.convert(
-                    item[FIELD_TYPES.type],
-                    item[FIELD_TYPES.content])
-                md_representation.append(conversion_result)
-
-            # md -> html (destination)
-            text = ''.join(md_representation)
-            html_representation = markdown.markdown(text)
-
-            # Insert id to headers
-            header_pattern = r"<h1>"
-            html = re.sub(header_pattern,
-                          lambda exp: r'<h1 id="{}">'.format(get_id_with_increment()),
-                          html_representation)
-
-            dst.write(html)
+    with open(source, 'r') as src, open(destination, 'w') as dst:
+        source_content = json.load(src)
+        for item in source_content:
+            validate_content(item)
+            conversion_result = converting_function(
+                item[FIELD_TYPES.type],
+                item[FIELD_TYPES.content]
+            )
+            dst.write(conversion_result)
 
 
 if __name__ == "__main__":
